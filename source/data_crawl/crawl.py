@@ -2,12 +2,15 @@ import json
 import os
 import re
 import time
+import pandas as pd
 from random import random
 from urllib.request import urlretrieve
 from uuid import uuid4
 
-from selenium.webdriver import Chrome, Firefox
+from selenium.webdriver import Firefox
+from selenium.webdriver.common.by import By
 from webdriver_manager.firefox import GeckoDriverManager
+from logger import get_logger, setup_logging
 
 
 def get_posts(hashtag, n, browser, delay=5):
@@ -56,20 +59,42 @@ def get_hashtags(url, browser):
 def get_image(url, hashtag):
     """Download image from given url and return its name"""
     uuid = uuid4()
-    urlretrieve(url, f"data/{hashtag}/{uuid}.jpg")
+    urlretrieve(url, f"../../dataset/data/{hashtag}/{uuid}.jpg")
     name = f"{uuid}.jpg"
     return name
 
 
-def crawl_data(hashtags, n, delay=5):
+def crawl_data(hashtags, n, delay=5, hashtag_threshold=4):
     """Download n images and return a dictionary with their metadata"""
+    setup_logging('crawl.txt', 'crawl')
+    logger = get_logger('crawl')
+    logger.info(f"Firefox started.")
     browser = Firefox(executable_path=GeckoDriverManager().install())
+    browser.implicitly_wait(1)
+
+    logger.info(f"Login to Instagram")
+    browser.get('https://www.instagram.com')
+    username_input = browser.find_element(By.CSS_SELECTOR, "input[name='username']")
+    password_input = browser.find_element(By.CSS_SELECTOR, "input[name='password']")
+
+    username_input.send_keys("your_username")
+    password_input.send_keys("your_password")
+
+    login_button = browser.find_element(By.XPATH, "//button[@type='submit']")
+    login_button.click()
+    time.sleep(20)
+
+    logger.info(f"Trying to get {n} posts for each hashtag.")
     for hashtag in hashtags:
+        logger.info(f"{hashtag} hashtag started.")
         posts = get_posts(hashtag, n, browser)
         try:
-            os.mkdir(f"data/{hashtag}")
+            os.mkdir(f"../../dataset/data/{hashtag}")
         except OSError as e:
-            print(e)
+            logger.info(e)
+
+        logger.info(f"{len(posts)} has been crawled for #{hashtag}")
+        counter = 0
 
         try:
             for post in posts:
@@ -77,17 +102,23 @@ def crawl_data(hashtags, n, delay=5):
                 time.sleep(random() * delay)
                 post["image_local_name"] = get_image(post["image"], hashtag)
                 time.sleep(random() * delay)
+                if len(post["hashtag"]) < hashtag_threshold:
+                    posts.remove(post)
+                else:
+                    counter += 1
             new_hashtag_metadata = posts
         except Exception as e:
             print(e)
             new_hashtag_metadata = posts
 
-        if os.path.exists(f"metadata/{hashtag}.json"):
-            with open(f"metadata/{hashtag}.json", "r") as f:
+        if os.path.exists(f"../../dataset/metadata/{hashtag}.json"):
+            with open(f"../../dataset/metadata/{hashtag}.json", "r") as f:
                 hashtag_metadata = json.load(f)
                 hashtag_metadata += new_hashtag_metadata
         else:
             hashtag_metadata = new_hashtag_metadata
 
-        with open(f"metadata/{hashtag}.json", "w") as f:
+        with open(f"../../dataset/metadata/{hashtag}.json", "w") as f:
             json.dump(hashtag_metadata, f)
+        logger.info(f"#{hashtag} is finished and {counter} suitable posts are found.")
+
